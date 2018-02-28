@@ -1,13 +1,5 @@
 import sbt.ScriptedPlugin
-
-val osInf = Option(System.getProperty("os.name")).getOrElse("")
-
-val isUnix    = osInf.indexOf("nix") >= 0 || osInf.indexOf("nux") >= 0
-val isWindows = osInf.indexOf("Win") >= 0
-val isMac     = osInf.indexOf("Mac") >= 0
-
-val osName = if (isWindows) "win" else if (isMac) "mac" else "unix"
-val osArch = System.getProperty("sun.arch.data.model")
+import Architecture._
 
 val inoxVersion = "1.0.2-282-gea965b6"
 val dottyVersion = "0.1.1-bin-20170429-10a2ce6-NIGHTLY"
@@ -226,32 +218,37 @@ lazy val `stainless-library` = (project in file("frontends") / "library")
   )
 
 lazy val `stainless-scalac` = (project in file("frontends/scalac"))
+  .disablePlugins(AssemblyPlugin)
   .settings(
     name := "stainless-scalac",
     frontendClass := "scalac.ScalaCompiler",
     extraClasspath := "", // no need for the classpath extension with scalac
-    libraryDependencies += "org.scala-lang" % "scala-compiler" % scalaVersion.value,
-    assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false),
-    assemblyExcludedJars in assembly := {
-      val cp = (fullClasspath in assembly).value
-      // Don't include scalaz3 dependency because it is OS dependent
-      cp filter {_.data.getName.startsWith("scalaz3")}
-    },
-    skip in publish := true // following https://github.com/sbt/sbt-assembly#q-despite-the-concerned-friends-i-still-want-publish-fat-jars-what-advice-do-you-have
+    libraryDependencies += "org.scala-lang" % "scala-compiler" % scalaVersion.value
   )
   .dependsOn(`stainless-core`)
   //.dependsOn(inox % "test->test;it->test,it")
   .configs(IntegrationTest)
   .settings(commonSettings, commonFrontendSettings, scriptSettings)
 
-// Following https://github.com/sbt/sbt-assembly#q-despite-the-concerned-friends-i-still-want-publish-fat-jars-what-advice-do-you-have
-lazy val `stainless-scalac-assembly` = project
-  .settings(artifactSettings)
-  .settings(
-    name := "stainless-scalac-plugin",
-    crossVersion := CrossVersion.full, // because compiler api is not binary compatible
-    packageBin in Compile := (assembly in (`stainless-scalac`, Compile)).value
-  )
+def stainlessScalacAssemblyProject(osInfo: String, architecture: String) = {
+  val projectName = s"stainless-scalac-plugin-$osInfo-$architecture"
+  Project(projectName, file("target") / projectName)
+    .settings(artifactSettings)
+    .settings(
+      name := projectName,
+      unmanagedJars in Compile += root.base / "unmanaged" / s"scalaz3-$osInfo-$architecture-${scalaBinaryVersion.value}.jar",
+      crossVersion := CrossVersion.full, // because compiler api is not binary compatible
+      assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false),
+      assemblyJarName in assembly := s"${projectName}_${scalaVersion.value}-${version.value}.jar",
+      packageBin in Compile := (assembly in Compile).value
+    )
+    .dependsOn(`stainless-scalac`)
+}
+
+lazy val `stainless-scalac-unix32` = stainlessScalacAssemblyProject("unix", 32.toString)
+lazy val `stainless-scalac-unix64` = stainlessScalacAssemblyProject("unix", 64.toString)
+lazy val `stainless-scalac-win64` = stainlessScalacAssemblyProject("win", 64.toString)
+lazy val `stainless-scalac-mac64` = stainlessScalacAssemblyProject("mac", 64.toString)
 
 lazy val `stainless-dotty-frontend` = (project in file("frontends/dotty"))
   .disablePlugins(AssemblyPlugin)
@@ -286,14 +283,19 @@ lazy val `sbt-stainless` = (project in file("sbt-plugin"))
     buildInfoKeys := Seq[BuildInfoKey](
       BuildInfoKey.map(version) { case (_, v) => "stainlessVersion" -> v },
       "supportedScalaVersions" -> SupportedScalaVersions
-    )
+    ),
+    sourceGenerators in Compile += Def.task {
+      val origin = (baseDirectory in ThisBuild).value / "project" / "Architecture.scala"
+      val file = (sourceManaged in Compile).value / "ch" / "epfl" / "lara" / "sbt" / "stainless" / "Architecture.scala"
+      IO.write(file, "package ch.epfl.lara.sbt.stainless\n\n" + IO.read(origin))
+      Seq(file)
+    }
   )
   .settings(scriptedSettings)
   .settings(
     scriptedDependencies := {
       publishLocal.value
       (publishLocal in `stainless-library`).value
-      (publishLocal in `stainless-scalac-assembly`).value
     }
   )
 

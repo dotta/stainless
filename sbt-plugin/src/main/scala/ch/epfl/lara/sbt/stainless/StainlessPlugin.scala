@@ -46,10 +46,8 @@ object StainlessPlugin extends sbt.AutoPlugin {
     stainlessVersion := BuildInfo.stainlessVersion,
     autoCompilerPlugins := true,
     ivyConfigurations += StainlessLibSources,
-    // FIXME: The pluging currently expects that a SMT solver is in the $PATH. To fix this I need to know where the scalaz3 dependency
-    //        is deployed.
     libraryDependencies ++= Seq(
-      compilerPlugin("ch.epfl.lara" % s"stainless-scalac-plugin_${scalaVersion.value}" % stainlessVersion.value),
+      compilerPlugin("ch.epfl.lara" % s"stainless-scalac-plugin-${Architecture.osName}-${Architecture.osArch}_${scalaVersion.value}" % stainlessVersion.value),
       ("ch.epfl.lara" % s"stainless-library_${scalaVersion.value}" % stainlessVersion.value).sources() % StainlessLibSources
     )
   ) ++ inConfig(Compile)(compileSettings)
